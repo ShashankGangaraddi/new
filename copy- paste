@@ -1,8 +1,1 @@
-shashank-g@Firewall-VM:~/Downloads$ sudo -i
-root@Firewall-VM:~# nano test_queue.py
-root@Firewall-VM:~# python3 test_queue.py 
-Traceback (most recent call last):
-  File "/root/test_queue.py", line 8, in <module>
-    queue.bind(0, print_and_accept)
-  File "netfilterqueue/_impl.pyx", line 282, in netfilterqueue._impl.NetfilterQueue.bind
-OSError: Failed to create queue 0.
+hi
