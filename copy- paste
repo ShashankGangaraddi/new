@@ -1,72 +1,43 @@
+# firewall_honeypot.py
 import logging
-import socket
-import threading
 from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP, send
+from scapy.all import IP, TCP
 
-# Configuration
-SSH_PORT = 22
-BLOCKED_IP = "192.168.50.100"
-LOG_FILE = "honeypot.log"
-
-# Setup logging
+# Configure logging
 logging.basicConfig(
-    filename=LOG_FILE,
-    format='%(asctime)s [HONEYPOT] %(message)s',
-    level=logging.INFO
+    filename='honeypot.log',
+    level=logging.INFO,
+    format='%(asctime)s [HONEYPOT] %(message)s'
 )
 
-# Fake SSH banner sender
-def send_fake_ssh_banner(client_ip):
-    try:
-        # Create a fake TCP server socket
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.bind(("0.0.0.0", SSH_PORT))
-        server_socket.listen(1)
+# Configuration
+ALLOWED_IP = "192.168.50.2"    # Use a fake IP so that all others trigger honeypot
+ALLOWED_PORT = 22              # Only allow SSH on port 22 from the allowed IP
 
-        print(f"[HONEYPOT] Fake SSH server running for {client_ip}...")
+def process_packet(packet):
+    payload = packet.get_payload()
+    pkt = IP(payload)
 
-        conn, addr = server_socket.accept()
-        banner = "SSH-2.0-OpenSSH_7.4p1 Debian-10+deb9u7\r\n"
-        conn.sendall(banner.encode())
-        conn.close()
-        server_socket.close()
-    except Exception as e:
-        print(f"[HONEYPOT ERROR] Could not send fake SSH banner to {client_ip}: {e}")
+    if pkt.haslayer(TCP):
+        src_ip = pkt[IP].src
+        dst_port = pkt[TCP].dport
 
-# Packet handler
-def packet_callback(pkt):
-    scapy_pkt = IP(pkt.get_payload())
+        if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
+            print(f"[FIREWALL] Allowed: {src_ip}:{dst_port}")
+            packet.accept()
+        else:
+            print(f"[HONEYPOT] Logging attempt from {src_ip}:{dst_port}")
+            logging.info(f"Detected unauthorized access from {src_ip} to port {dst_port}")
+            packet.drop()
+    else:
+        packet.accept()
 
-    if scapy_pkt.haslayer(TCP) and scapy_pkt[TCP].dport == SSH_PORT:
-        src_ip = scapy_pkt[IP].src
-        print(f"[ACCESS] {src_ip} --> port 22")
+nfqueue = NetfilterQueue()
+nfqueue.bind(1, process_packet)
 
-        if src_ip == BLOCKED_IP:
-            print(f"[HONEYPOT] Unauthorized IP {src_ip} tried to connect to SSH. Logging and faking response.")
-            logging.info(f"Unauthorized SSH access attempt from {src_ip}")
-            
-            # Drop the real packet
-            pkt.drop()
-
-            # Send fake SSH banner in a thread
-            thread = threading.Thread(target=send_fake_ssh_banner, args=(src_ip,))
-            thread.start()
-            return
-
-    # Accept allowed traffic
-    pkt.accept()
-
-# Main function
-def main():
-    print("[*] Starting firewall and honeypot...")
-    nfqueue = NetfilterQueue()
-    nfqueue.bind(1, packet_callback)
-    try:
-        nfqueue.run()
-    except KeyboardInterrupt:
-        print("\n[*] Stopping firewall.")
-        nfqueue.unbind()
-
-if _name_ == "_main_":
-    main()
+print("[*] Firewall & Honeypot running. Waiting for packets...")
+try:
+    nfqueue.run()
+except KeyboardInterrupt:
+    print("\n[*] Stopping firewall.")
+    nfqueue.unbind() 
