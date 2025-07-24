@@ -3,67 +3,46 @@ import netfilterqueue
 import scapy.all as scapy
 import os
 
-# A set to hold the IP addresses of known bad hosts
-# We will manually add an IP to this set for testing
+# A set to hold IP addresses we want to block
 BLOCKED_IPS = {"1.1.1.1"} 
 
 def process_packet(packet):
     """
-    This function is called for each packet that the kernel sends to our queue.
-    This is where all our firewall logic will go.
+    This function is called for each packet.
     """
-    # Convert the raw packet data from the queue into a Scapy packet object
-    # This makes it easy to read the packet's layers and fields
+    # Convert the raw packet to a Scapy packet
     scapy_packet = scapy.IP(packet.get_payload())
 
-    # --- FIREWALL RULE LOGIC ---
-
-    # Rule 1: Check if the packet is from a blocked IP address
+    # --- FIREWALL RULE ---
+    # Block any outgoing packet with a destination IP in our block list
     if scapy_packet.haslayer(scapy.IP):
-        # scapy_packet[scapy.IP].src is the source IP address
-        if scapy_packet[scapy.IP].src in BLOCKED_IPS:
-            print(f"[+] Packet from blocked IP {scapy_packet[scapy.IP].src} found. Dropping packet.")
-            # Drop the packet and stop processing it further
+        # We check the DESTINATION of the packet
+        if scapy_packet[scapy.IP].dst in BLOCKED_IPS:
+            # I've updated the print message to be more accurate, too
+            print(f"[+] Blocked outgoing packet to destination {scapy_packet[scapy.IP].dst}. Dropping.")
             packet.drop()
-            return # Exit the function for this packet
+            return # Exit the function
 
-    # Rule 2: Log all HTTP GET requests (for demonstration)
-    # HTTP runs over TCP, usually on port 80
-    if scapy_packet.haslayer(scapy.TCP) and scapy_packet[scapy.TCP].dport == 80:
-        if scapy_packet.haslayer(scapy.Raw):
-            # scapy.Raw contains the actual data payload of the packet
-            payload = scapy_packet[scapy.Raw].load
-            # Check if the payload contains the bytes for an HTTP GET request
-            if b"GET" in payload:
-                print(f"[*] Detected HTTP GET request from {scapy_packet[scapy.IP].src}")
-
-    # --- HONEYPOT LOGIC (will be added here later) ---
-    # For now, we will focus on the basic firewall.
-
-
-    # --- DEFAULT VERDICT ---
-    # If the packet did not match any of our drop rules, we let it pass.
+    # If no block rule matched, accept the packet
     packet.accept()
 
 
 # --- MAIN EXECUTION BLOCK ---
 print("[+] Firewall starting up...")
 
-# Create a NetfilterQueue object
+# Create the queue object
 queue = netfilterqueue.NetfilterQueue()
 
-# Bind the queue object to queue number 0. 
-# For every packet that goes into queue 0, call the 'process_packet' function.
-# This is the core connection between the kernel and our script.
+# Bind to queue 0 and set the callback function
 queue.bind(0, process_packet)
 
 try:
-    # Start running the queue. This will listen for packets indefinitely.
+    # Start running the queue
     print("[+] Firewall is now running. Waiting for packets...")
     queue.run()
 except KeyboardInterrupt:
-    # This code runs if you press Ctrl+C to stop the script
-    print("\n[+] Firewall shutting down. Unbinding queue.")
+    # This code runs if you press Ctrl+C
+    print("\n[+] Firewall shutting down.")
     queue.unbind()
 
 print("[+] Firewall stopped.")
