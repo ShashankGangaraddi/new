@@ -1,1 +1,1 @@
-wget https://github.com/AdamC00/NetfilterQueue/archive/refs/heads/master.zip
+sudo pip3 install PyNetfilterQueue scapy --break-system-packages
