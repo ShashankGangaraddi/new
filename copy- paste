@@ -1,65 +1,68 @@
+# firewall_honeypot.py
+import logging
 import socket
 import threading
-import logging
+from netfilterqueue import NetfilterQueue
+from scapy.all import IP, TCP
 
-# Configuration
-ALLOWED_IP = "192.168.50.101"  # Replace this with your real server IP
-BLOCKED_IP = "192.168.50.100"  # The client that should get mimicked
-FAKE_SSH_PORT = 22             # Real SSH port to mimic
-FAKE_SSH_BANNER = "SSH-2.0-OpenSSH_8.4p1 Ubuntu-6ubuntu1.4\r\n"
+BLOCKED_IP = "192.168.50.100"
+SSH_PORT = 22
 
-# Log setup
-logging.basicConfig(filename="honeypot.log", level=logging.INFO, format='%(asctime)s - %(message)s')
+# Set up logging
+logging.basicConfig(filename='honeypot.log',
+                    format='%(asctime)s [HONEYPOT] %(message)s',
+                    level=logging.INFO)
 
-def handle_connection(conn, addr):
-    ip = addr[0]
-    print(f"[+] Incoming connection from {ip}")
-
-    if ip == BLOCKED_IP:
-        logging.info(f"Unauthorized IP {ip} attempted SSH access and was mimicked.")
-        try:
-            conn.sendall(FAKE_SSH_BANNER.encode())
-        except Exception as e:
-            print(f"[!] Error sending fake banner: {e}")
-        conn.close()
-    else:
-        print(f"[-] Authorized IP {ip} - forwarding to real SSH server.")
-        try:
-            real_ssh = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            real_ssh.connect((ALLOWED_IP, 22))  # Local SSH server
-            threading.Thread(target=proxy, args=(conn, real_ssh)).start()
-            threading.Thread(target=proxy, args=(real_ssh, conn)).start()
-        except Exception as e:
-            print(f"[!] SSH forwarding error: {e}")
-            conn.close()
-
-def proxy(src, dst):
+def send_fake_ssh_banner(client_ip):
+    """Creates a fake SSH listener for blocked IP."""
     try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("0.0.0.0", SSH_PORT))
+        sock.listen(1)
+
         while True:
-            data = src.recv(4096)
-            if not data:
-                break
-            dst.sendall(data)
-    except:
-        pass
-    finally:
-        src.close()
-        dst.close()
+            conn, addr = sock.accept()
+            if addr[0] == BLOCKED_IP:
+                banner = b"SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3\r\n"
+                conn.sendall(banner)
+                conn.close()
+    except Exception as e:
+        print(f"[!] Error in fake SSH: {e}")
 
-def start_honeypot():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+def process_packet(packet):
+    payload = packet.get_payload()
+    pkt = IP(payload)
+
+    if pkt.haslayer(TCP):
+        src_ip = pkt[IP].src
+        dst_port = pkt[TCP].dport
+
+        print(f"[INFO] Connection attempt from {src_ip}:{dst_port}")
+
+        # Block and mimic only if IP is the blocked one and port is 22
+        if src_ip == BLOCKED_IP and dst_port == SSH_PORT:
+            logging.info(f"Unauthorized SSH attempt from {src_ip}")
+            packet.drop()
+        else:
+            packet.accept()
+    else:
+        packet.accept()
+
+def main():
+    print("[*] Starting firewall and honeypot...")
+
+    # Start fake SSH thread
+    ssh_thread = threading.Thread(target=send_fake_ssh_banner, daemon=True)
+    ssh_thread.start()
+
+    # Bind NetfilterQueue
+    nfqueue = NetfilterQueue()
+    nfqueue.bind(1, process_packet)
     try:
-        sock.bind(('0.0.0.0', FAKE_SSH_PORT))
-    except PermissionError:
-        print("[!] Use sudo to bind to port 22 (required for SSH).")
-        return
-    sock.listen(100)
-    print(f"[+] SSH Honeypot running on port {FAKE_SSH_PORT}...")
-
-    while True:
-        client, addr = sock.accept()
-        threading.Thread(target=handle_connection, args=(client, addr)).start()
+        nfqueue.run()
+    except KeyboardInterrupt:
+        print("\n[!] Stopping firewall.")
+        nfqueue.unbind()
 
 if _name_ == "_main_":
-    start_honeypot()
+    main()
