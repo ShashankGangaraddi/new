@@ -1,44 +1,52 @@
-from scapy.all import sniff, IP, TCP
-import socket
+from netfilterqueue import NetfilterQueue
+from scapy.all import IP, TCP, send, Raw
 import logging
+import os
 
-# Define allowed IPs (block only 192.168.50.100)
-ALLOWED_IPS = ['192.168.50.' + str(i) for i in range(1, 255) if i != 100]
+BLOCKED_IP = "192.168.50.100"
 
-# Configure log for unauthorized SSH attempts
-logging.basicConfig(filename="honeypot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
+# Set up logging
+logging.basicConfig(filename="honeypot.log", level=logging.INFO, format="%(asctime)s [FAKE SSH] %(message)s")
 
-# Function to send fake SSH banner to client
-def mimic_ssh(ip):
-    try:
-        print(f"[HONEYPOT] Mimicking SSH for unauthorized IP {ip}")
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(("0.0.0.0", 22))
-        s.listen(1)
-        conn, addr = s.accept()
-        if addr[0] == ip:
-            banner = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3\n"
-            conn.send(banner.encode())
-            conn.close()
-        s.close()
-    except Exception as e:
-        print(f"[!] Failed to mimic SSH: {e}")
-
-# Sniffer callback
-def packet_callback(pkt):
-    if IP in pkt and TCP in pkt:
+def process_packet(packet):
+    pkt = IP(packet.get_payload())
+    
+    if pkt.haslayer(TCP):
         src_ip = pkt[IP].src
         dst_port = pkt[TCP].dport
 
-        # Display all incoming IPs (any port)
+        # Show all traffic live
         print(f"[ACCESS] {src_ip} --> port {dst_port}")
 
-        # If port 22 (SSH) and not from allowed IPs
-        if dst_port == 22 and src_ip not in ALLOWED_IPS:
-            log_msg = f"Unauthorized SSH access from {src_ip}"
-            logging.info(log_msg)
-            mimic_ssh(src_ip)
+        if dst_port == 22 and src_ip == BLOCKED_IP:
+            # Log to honeypot
+            logging.info(f"Detected SSH access from {src_ip}")
 
-# Start sniffing (root required)
-print("[*] Starting Firewall + Honeypot... (Press Ctrl+C to stop)")
-sniff(filter="tcp", prn=packet_callback, store=0)
+            # Respond with fake SSH banner to make it look real
+            if pkt[TCP].flags == "S":
+                ip_resp = IP(dst=src_ip, src=pkt[IP].dst)
+                tcp_resp = TCP(sport=22, dport=pkt[TCP].sport, seq=1000, ack=pkt[TCP].seq + 1, flags="SA")
+                send(ip_resp/tcp_resp, verbose=0)
+
+            elif pkt[TCP].flags == "A":
+                ip_resp = IP(dst=src_ip, src=pkt[IP].dst)
+                tcp_resp = TCP(sport=22, dport=pkt[TCP].sport, seq=1001, ack=pkt[TCP].seq + 1, flags="PA")
+                banner = Raw(load="SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n")
+                send(ip_resp/tcp_resp/banner, verbose=0)
+
+            packet.drop()
+            return
+
+    packet.accept()
+
+print("[*] Firewall & Honeypot running. Waiting for packets...")
+
+nfqueue = NetfilterQueue()
+nfqueue.bind(0, process_packet)
+
+try:
+    nfqueue.run()
+except KeyboardInterrupt:
+    print("\n[!] Stopping Firewall & Cleaning up...")
+    nfqueue.unbind()
+    os.system("sudo iptables -F")
