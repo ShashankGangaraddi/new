@@ -1,1 +1,2 @@
-sudo pip3 install PyNetfilterQueue scapy --break-system-packages
+ERROR: Could not find a version that satisfies the requirement PyNetfilterQueue (from versions: none)
+ERROR: No matching distribution found for PyNetfilterQueue
