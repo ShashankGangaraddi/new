@@ -1,20 +1,5 @@
-shashank-g@Firewall-VM:~/Downloads$ sudo python3 my_firewall.py 
-[+] Firewall starting up...
-Traceback (most recent call last):
-  File "/home/shashank-g/Downloads/my_firewall.py", line 58, in <module>
-    queue.bind(0, process_packet)
-  File "netfilterqueue/_impl.pyx", line 282, in netfilterqueue._impl.NetfilterQueue.bind
-OSError: Failed to create queue 0.
+shashank-g@Firewall-VM:~/Downloads$ sudo iptables -L FORWARD -v -n
+Chain FORWARD (policy ACCEPT 60 packets, 4437 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+   38  2770 NFQUEUE    0    --  *      *       0.0.0.0/0            0.0.0.0/0            NFQUEUE num 0
 shashank-g@Firewall-VM:~/Downloads$ ^C
-shashank-g@Firewall-VM:~/Downloads$ sudo modprobe nfnetlink_queue
-shashank-g@Firewall-VM:~/Downloads$ sudo iptables -F FORWARD
-shashank-g@Firewall-VM:~/Downloads$ sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
-shashank-g@Firewall-VM:~/Downloads$ sudo python3 my_firewall.py 
-[+] Firewall starting up...
-Traceback (most recent call last):
-  File "/home/shashank-g/Downloads/my_firewall.py", line 58, in <module>
-    queue.bind(0, process_packet)
-  File "netfilterqueue/_impl.pyx", line 282, in netfilterqueue._impl.NetfilterQueue.bind
-OSError: Failed to create queue 0.
-shashank-g@Firewall-VM:~/Downloads$ 
-
