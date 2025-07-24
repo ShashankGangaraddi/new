@@ -1,71 +1,58 @@
 # firewall_honeypot.py
 import logging
-import socket
-import threading
 from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP
+from scapy.all import IP, TCP, send
 
-# --- CONFIG ---
-ALLOWED_IP = "192.168.50.100"   # Only allow SSH from this IP
-SSH_PORT = 22
-FAKE_SSH_BANNER = b"SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3\r\n"
-LOG_FILE = "honeypot.log"
-
-# --- Setup Logging ---
+# Setup logging for unauthorized attempts only
 logging.basicConfig(
-    filename=LOG_FILE,
+    filename="honeypot.log",
     level=logging.INFO,
-    format='%(asctime)s [HONEYPOT] %(message)s'
+    format="%(asctime)s [HONEYPOT] %(message)s"
 )
 
-# --- SSH Honeypot Function ---
-def fake_ssh_server():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("0.0.0.0", SSH_PORT))  # Bind to real SSH port
-    sock.listen(5)
-    print(f"[HONEYPOT] Fake SSH listening on port {SSH_PORT}")
+# Configuration
+BLOCKED_IP = "192.168.50.100"
+SSH_PORT = 22
 
-    while True:
-        client_sock, client_addr = sock.accept()
-        ip = client_addr[0]
-        print(f"[HONEYPOT] Connection attempt from {ip}")
-
-        if ip != ALLOWED_IP:
-            try:
-                client_sock.sendall(FAKE_SSH_BANNER)
-                logging.info(f"Unauthorized SSH attempt from {ip}")
-            except:
-                pass
-        client_sock.close()
-
-# --- Netfilter Firewall Packet Handler ---
 def process_packet(packet):
-    pkt = IP(packet.get_payload())
+    payload = packet.get_payload()
+    pkt = IP(payload)
 
-    if pkt.haslayer(TCP) and pkt[TCP].dport == SSH_PORT:
+    if pkt.haslayer(TCP) and pkt.haslayer(IP):
         src_ip = pkt[IP].src
-        print(f"[FIREWALL] Attempt from {src_ip}:{pkt[TCP].dport}")
+        dst_ip = pkt[IP].dst
+        dst_port = pkt[TCP].dport
+        sport = pkt[TCP].sport
+        flags = pkt[TCP].flags
 
-        if src_ip == ALLOWED_IP:
-            packet.accept()
-        else:
-            packet.drop()  # Let fake SSH handle it instead
-    else:
-        packet.accept()
+        # Show all IPs accessing
+        print(f"[ACCESS] {src_ip} --> port {dst_port}")
 
-# --- Start Everything ---
-if _name_ == "_main_":
-    try:
-        # Start Honeypot Thread
-        ssh_thread = threading.Thread(target=fake_ssh_server, daemon=True)
-        ssh_thread.start()
+        if dst_port == SSH_PORT:
+            if src_ip == BLOCKED_IP:
+                # Fake response: mimic SSH banner if it's SYN
+                if flags == "S":
+                    print(f"[HONEYPOT] Unauthorized SSH access from {src_ip}")
+                    logging.info(f"Unauthorized SSH access from {src_ip}")
 
-        # Set up Netfilter Queue
-        nfqueue = NetfilterQueue()
-        nfqueue.bind(1, process_packet)
-        print("[*] Firewall & Honeypot running...")
-        nfqueue.run()
+                    fake_response = IP(dst=src_ip, src=dst_ip) / \
+                                    TCP(dport=sport, sport=SSH_PORT, seq=12345, ack=pkt[TCP].seq + 1, flags="SA")
+                    send(fake_response, verbose=0)
+                # Drop the packet
+                packet.drop()
+                return
 
-    except KeyboardInterrupt:
-        print("\n[!] Stopping firewall...")
-        nfqueue.unbind()
+    # Accept all others
+    packet.accept()
+
+# Setup NFQUEUE
+nfqueue = NetfilterQueue()
+nfqueue.bind(1, process_packet)
+
+print("[*] Firewall + Honeypot is running...")
+
+try:
+    nfqueue.run()
+except KeyboardInterrupt:
+    print("\n[*] Stopping firewall.")
+    nfqueue.unbind()
