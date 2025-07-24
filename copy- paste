@@ -1,52 +1,49 @@
 from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP, send, Raw
-import logging
-import os
+from scapy.all import IP, TCP, send
+import time
 
-BLOCKED_IP = "192.168.50.100"
+HONEYPOT_IP = "192.168.50.100"   # Block and fake only this IP
+HONEYPOT_PORT = 22               # Targeting SSH port
+LOG_FILE = "honeypot.log"
 
-# Set up logging
-logging.basicConfig(filename="honeypot.log", level=logging.INFO, format="%(asctime)s [FAKE SSH] %(message)s")
+def log_unauthorized(ip, sport):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_FILE, "a") as log:
+        log.write(f"[{timestamp}] Unauthorized SSH access attempt from {ip}:{sport}\n")
 
-def process_packet(packet):
-    pkt = IP(packet.get_payload())
-    
-    if pkt.haslayer(TCP):
-        src_ip = pkt[IP].src
-        dst_port = pkt[TCP].dport
+def packet_callback(pkt):
+    scapy_pkt = IP(pkt.get_payload())
 
-        # Show all traffic live
-        print(f"[ACCESS] {src_ip} --> port {dst_port}")
+    # Check if packet is from the honeypot IP and is SSH (port 22)
+    if scapy_pkt.haslayer(TCP):
+        src_ip = scapy_pkt[IP].src
+        dst_port = scapy_pkt[TCP].dport
 
-        if dst_port == 22 and src_ip == BLOCKED_IP:
-            # Log to honeypot
-            logging.info(f"Detected SSH access from {src_ip}")
+        # Log and mimic only .100 trying to access SSH
+        if src_ip.endswith(".100") and dst_port == HONEYPOT_PORT:
+            print(f"[BLOCKED & LOGGED] Unauthorized SSH from {src_ip}")
+            log_unauthorized(src_ip, scapy_pkt[TCP].sport)
 
-            # Respond with fake SSH banner to make it look real
-            if pkt[TCP].flags == "S":
-                ip_resp = IP(dst=src_ip, src=pkt[IP].dst)
-                tcp_resp = TCP(sport=22, dport=pkt[TCP].sport, seq=1000, ack=pkt[TCP].seq + 1, flags="SA")
-                send(ip_resp/tcp_resp, verbose=0)
+            # Mimic SSH banner (fake reply)
+            fake_reply = IP(dst=scapy_pkt[IP].src, src=scapy_pkt[IP].dst) / \
+                         TCP(dport=scapy_pkt[TCP].sport, sport=scapy_pkt[TCP].dport,
+                             seq=12345, ack=scapy_pkt[TCP].seq + 1,
+                             flags='SA')  # SYN-ACK
 
-            elif pkt[TCP].flags == "A":
-                ip_resp = IP(dst=src_ip, src=pkt[IP].dst)
-                tcp_resp = TCP(sport=22, dport=pkt[TCP].sport, seq=1001, ack=pkt[TCP].seq + 1, flags="PA")
-                banner = Raw(load="SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n")
-                send(ip_resp/tcp_resp/banner, verbose=0)
-
-            packet.drop()
-            return
-
-    packet.accept()
-
-print("[*] Firewall & Honeypot running. Waiting for packets...")
+            send(fake_reply, verbose=False)
+            pkt.drop()
+        else:
+            print(f"[ALLOWED] Access from {src_ip} to port {dst_port}")
+            pkt.accept()
+    else:
+        pkt.accept()
 
 nfqueue = NetfilterQueue()
-nfqueue.bind(0, process_packet)
+nfqueue.bind(1, packet_callback)
 
+print("🔥 Firewall-Honeypot active. Monitoring traffic...")
 try:
     nfqueue.run()
 except KeyboardInterrupt:
-    print("\n[!] Stopping Firewall & Cleaning up...")
+    print("\nExiting...")
     nfqueue.unbind()
-    os.system("sudo iptables -F")
