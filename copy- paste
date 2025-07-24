@@ -1,1 +1,41 @@
-hwlo
+from netfilterqueue import NetfilterQueue
+from scapy.all import IP, TCP
+import logging
+
+Configuration
+ALLOWED_IP = '192.168.1.102' # Replace this with your Client VM's IP address
+ALLOWED_PORT = 22 # Replace with allowed port (e.g., 22 for SSH)
+
+Set up logging
+logging.basicConfig(filename="honeypot.log", level=logging.INFO, format='%(asctime)s - %(message)s')
+
+def honeypot(pkt):
+scapy_pkt = IP(pkt.get_payload())
+if scapy_pkt.haslayer(TCP):
+src_ip = scapy_pkt[IP].src
+dst_port = scapy_pkt[TCP].dport
+logging.info(f"HONEYPOT: Denied access from {src_ip} to port {dst_port}")
+pkt.drop() # Drop the packet
+
+def process_packet(pkt):
+scapy_pkt = IP(pkt.get_payload())
+if scapy_pkt.haslayer(TCP):
+src_ip = scapy_pkt[IP].src
+dst_port = scapy_pkt[TCP].dport
+if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
+pkt.accept() # Allow
+else:
+honeypot(pkt) # Send to honeypot logger
+else:
+pkt.accept() # Allow non-TCP packets (like ICMP/ping)
+
+nfqueue = NetfilterQueue()
+nfqueue.bind(1, process_packet)
+
+try:
+print("[*] Firewall + Honeypot running...")
+nfqueue.run()
+except KeyboardInterrupt:
+print("Stopping.")
+finally:
+nfqueue.unbind()
