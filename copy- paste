@@ -1,19 +1,45 @@
-# firewall_honeypot.py
 import logging
+import threading
+import socket
 from netfilterqueue import NetfilterQueue
 from scapy.all import IP, TCP
 
-# Configure logging
+# Logging Configuration
 logging.basicConfig(
     filename='honeypot.log',
     level=logging.INFO,
     format='%(asctime)s [HONEYPOT] %(message)s'
 )
 
-# Configuration
-ALLOWED_IP = "192.168.50.2"    # Use a fake IP so that all others trigger honeypot
-ALLOWED_PORT = 22              # Only allow SSH on port 22 from the allowed IP
+# Constants
+BLOCKED_IP = "192.168.50.100"     # Client IP to block and trap
+MONITORED_PORT = 22               # SSH port to monitor
+FAKE_SSH_PORT = 2222              # Fake port to simulate SSH
 
+# --- FAKE SSH SERVER FUNCTION ---
+def fake_ssh_server():
+    HOST = '0.0.0.0'
+    PORT = FAKE_SSH_PORT
+    BANNER = b"SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.3\r\n"
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen(5)
+    print(f"[+] Fake SSH Honeypot running on port {PORT}")
+
+    while True:
+        client_sock, addr = server.accept()
+        print(f"[!] Honeypot interaction from {addr[0]}:{addr[1]}")
+        logging.info(f"Fake SSH interaction with {addr[0]}:{addr[1]}")
+        try:
+            client_sock.sendall(BANNER)
+        except Exception as e:
+            print(f"[!] Error: {e}")
+        finally:
+            client_sock.close()
+
+# --- FIREWALL PACKET HANDLER ---
 def process_packet(packet):
     payload = packet.get_payload()
     pkt = IP(payload)
@@ -22,22 +48,30 @@ def process_packet(packet):
         src_ip = pkt[IP].src
         dst_port = pkt[TCP].dport
 
-        if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
+        if src_ip == BLOCKED_IP and dst_port == MONITORED_PORT:
+            print(f"[HONEYPOT] Unauthorized SSH attempt from {src_ip}")
+            logging.info(f"Blocked SSH attempt from {src_ip} to port {dst_port}")
+            packet.drop()
+        else:
             print(f"[FIREWALL] Allowed: {src_ip}:{dst_port}")
             packet.accept()
-        else:
-            print(f"[HONEYPOT] Logging attempt from {src_ip}:{dst_port}")
-            logging.info(f"Detected unauthorized access from {src_ip} to port {dst_port}")
-            packet.drop()
     else:
         packet.accept()
 
-nfqueue = NetfilterQueue()
-nfqueue.bind(1, process_packet)
+# --- MAIN ENTRY ---
+if _name_ == "_main_":
+    # Start fake SSH in a thread
+    honeypot_thread = threading.Thread(target=fake_ssh_server, daemon=True)
+    honeypot_thread.start()
 
-print("[*] Firewall & Honeypot running. Waiting for packets...")
-try:
-    nfqueue.run()
-except KeyboardInterrupt:
-    print("\n[*] Stopping firewall.")
-    nfqueue.unbind()
+    # Start Netfilter Queue
+    nfqueue = NetfilterQueue()
+    nfqueue.bind(1, process_packet)
+
+    print("[*] Firewall + Honeypot active. Monitoring packets...")
+
+    try:
+        nfqueue.run()
+    except KeyboardInterrupt:
+        print("\n[*] Stopping firewall and honeypot.")
+        nfqueue.unbind()
