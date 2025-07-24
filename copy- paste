@@ -1,1 +1,1 @@
-shashank
+sudo apt install build-essential python3-dev libnetfilter-queue-dev git python3-pip -y
