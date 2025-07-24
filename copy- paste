@@ -1,43 +1,44 @@
-import os
-import subprocess
-import logging
 from scapy.all import sniff, IP, TCP
+import socket
+import logging
 
-# Set up logging for unauthorized access
-logging.basicConfig(filename='honeypot.log',
-                    format='%(asctime)s [UNAUTHORIZED] %(message)s',
-                    level=logging.INFO)
+# Define allowed IPs (block only 192.168.50.100)
+ALLOWED_IPS = ['192.168.50.' + str(i) for i in range(1, 255) if i != 100]
 
-# Configuration
-SSH_PORT = 22
-BLOCKED_IP = "192.168.50.100"  # Only this IP is blocked
+# Configure log for unauthorized SSH attempts
+logging.basicConfig(filename="honeypot.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 
-def start_firewall():
-    os.system("sudo iptables -F")  # Flush existing rules
-    os.system(f"sudo iptables -A INPUT -p tcp --dport {SSH_PORT} -s {BLOCKED_IP} -j DROP")
-    print(f"[+] Firewall started: Blocking SSH access from {BLOCKED_IP}")
+# Function to send fake SSH banner to client
+def mimic_ssh(ip):
+    try:
+        print(f"[HONEYPOT] Mimicking SSH for unauthorized IP {ip}")
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("0.0.0.0", 22))
+        s.listen(1)
+        conn, addr = s.accept()
+        if addr[0] == ip:
+            banner = "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3\n"
+            conn.send(banner.encode())
+            conn.close()
+        s.close()
+    except Exception as e:
+        print(f"[!] Failed to mimic SSH: {e}")
 
-def stop_firewall():
-    os.system("sudo iptables -F")
-    print("[*] Firewall stopped.")
-
-def log_packet(pkt):
+# Sniffer callback
+def packet_callback(pkt):
     if IP in pkt and TCP in pkt:
         src_ip = pkt[IP].src
         dst_port = pkt[TCP].dport
-        if dst_port == SSH_PORT:
-            print(f"[ACCESS] {src_ip} --> port {dst_port}")
-            if src_ip == BLOCKED_IP:
-                logging.info(f"{src_ip} attempted SSH access and was blocked")
 
-def main():
-    try:
-        start_firewall()
-        print("[*] Monitoring SSH traffic...")
-        sniff(filter=f"tcp port {SSH_PORT}", prn=log_packet, store=0)
-    except KeyboardInterrupt:
-        stop_firewall()
-        print("[*] Exiting...")
+        # Display all incoming IPs (any port)
+        print(f"[ACCESS] {src_ip} --> port {dst_port}")
 
-if _name_ == "_main_":
-    main()
+        # If port 22 (SSH) and not from allowed IPs
+        if dst_port == 22 and src_ip not in ALLOWED_IPS:
+            log_msg = f"Unauthorized SSH access from {src_ip}"
+            logging.info(log_msg)
+            mimic_ssh(src_ip)
+
+# Start sniffing (root required)
+print("[*] Starting Firewall + Honeypot... (Press Ctrl+C to stop)")
+sniff(filter="tcp", prn=packet_callback, store=0)
