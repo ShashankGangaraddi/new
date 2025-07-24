@@ -1,2 +1,7 @@
-ERROR: Could not find a version that satisfies the requirement PyNetfilterQueue (from versions: none)
-ERROR: No matching distribution found for PyNetfilterQueue
+shashank-g@Firewall-VM:~/Downloads$ sudo python3 my_firewall.py 
+[+] Firewall starting up...
+Traceback (most recent call last):
+  File "/home/shashank-g/Downloads/my_firewall.py", line 58, in <module>
+    queue.bind(0, process_packet)
+  File "netfilterqueue/_impl.pyx", line 282, in netfilterqueue._impl.NetfilterQueue.bind
+OSError: Failed to create queue 0.
