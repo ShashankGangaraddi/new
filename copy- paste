@@ -1,43 +1,43 @@
-# firewall_honeypot.py
+import os
+import subprocess
 import logging
-from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP
+from scapy.all import sniff, IP, TCP
 
-# Configure logging
-logging.basicConfig(
-    filename='honeypot.log',
-    level=logging.INFO,
-    format='%(asctime)s [HONEYPOT] %(message)s'
-)
+# Set up logging for unauthorized access
+logging.basicConfig(filename='honeypot.log',
+                    format='%(asctime)s [UNAUTHORIZED] %(message)s',
+                    level=logging.INFO)
 
 # Configuration
-ALLOWED_IP = "192.168.50.2"    # Use a fake IP so that all others trigger honeypot
-ALLOWED_PORT = 22              # Only allow SSH on port 22 from the allowed IP
+SSH_PORT = 22
+BLOCKED_IP = "192.168.50.100"  # Only this IP is blocked
 
-def process_packet(packet):
-    payload = packet.get_payload()
-    pkt = IP(payload)
+def start_firewall():
+    os.system("sudo iptables -F")  # Flush existing rules
+    os.system(f"sudo iptables -A INPUT -p tcp --dport {SSH_PORT} -s {BLOCKED_IP} -j DROP")
+    print(f"[+] Firewall started: Blocking SSH access from {BLOCKED_IP}")
 
-    if pkt.haslayer(TCP):
+def stop_firewall():
+    os.system("sudo iptables -F")
+    print("[*] Firewall stopped.")
+
+def log_packet(pkt):
+    if IP in pkt and TCP in pkt:
         src_ip = pkt[IP].src
         dst_port = pkt[TCP].dport
+        if dst_port == SSH_PORT:
+            print(f"[ACCESS] {src_ip} --> port {dst_port}")
+            if src_ip == BLOCKED_IP:
+                logging.info(f"{src_ip} attempted SSH access and was blocked")
 
-        if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
-            print(f"[FIREWALL] Allowed: {src_ip}:{dst_port}")
-            packet.accept()
-        else:
-            print(f"[HONEYPOT] Logging attempt from {src_ip}:{dst_port}")
-            logging.info(f"Detected unauthorized access from {src_ip} to port {dst_port}")
-            packet.drop()
-    else:
-        packet.accept()
+def main():
+    try:
+        start_firewall()
+        print("[*] Monitoring SSH traffic...")
+        sniff(filter=f"tcp port {SSH_PORT}", prn=log_packet, store=0)
+    except KeyboardInterrupt:
+        stop_firewall()
+        print("[*] Exiting...")
 
-nfqueue = NetfilterQueue()
-nfqueue.bind(1, process_packet)
-
-print("[*] Firewall & Honeypot running. Waiting for packets...")
-try:
-    nfqueue.run()
-except KeyboardInterrupt:
-    print("\n[*] Stopping firewall.")
-    nfqueue.unbind() 
+if _name_ == "_main_":
+    main()
