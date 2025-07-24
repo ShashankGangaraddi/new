@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+import socket
+import datetime
+
+# The IP and Port our honeypot will listen on. 
+# 0.0.0.0 means it will listen on all available network interfaces.
+HOST = '0.0.0.0'
+PORT = 8080 # We use a non-standard port for our listener.
+
+print("[+] Honeypot starting...")
+print(f"[*] Listening for connections on {HOST}:{PORT}")
+
+# Create a new TCP socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    # This option allows us to reuse the port immediately after the script is stopped
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    # Bind the socket to the address and port
+    s.bind((HOST, PORT))
+    
+    # Start listening for incoming connections
+    s.listen()
+    
+    try:
+        while True:
+            # This line blocks and waits for a new connection
+            client_socket, client_address = s.accept()
+            
+            # --- ALARM TRIGGERED! ---
+            # When a connection happens, we log it and close it.
+            with client_socket:
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                attacker_ip = client_address[0]
+                attacker_port = client_address[1]
+                
+                # Log the intrusion to the console
+                print(f"--- HONEYPOT ALERT ---")
+                print(f"[*] Timestamp: {timestamp}")
+                print(f"[*] Connection from: {attacker_ip}:{attacker_port}")
+                print(f"[*] Attacker was trying to access our bait port!")
+                
+                # You could also write this to a file:
+                # with open("honeypot.log", "a") as log_file:
+                #     log_file.write(f"{timestamp} - Connection from {attacker_ip}:{attacker_port}\n")
+
+                # Send a fake banner to the attacker to make it look real
+                client_socket.sendall(b'Welcome to the Telnet server!\r\nPlease enter your credentials.\r\n')
+                # We don't wait for a reply, we just close the connection.
+    except KeyboardInterrupt:
+        print("\n[+] Honeypot shutting down.")
