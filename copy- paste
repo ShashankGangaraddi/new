@@ -2,40 +2,47 @@ from netfilterqueue import NetfilterQueue
 from scapy.all import IP, TCP
 import logging
 
-Configuration
-ALLOWED_IP = '192.168.1.102' # Replace this with your Client VM's IP address
-ALLOWED_PORT = 22 # Replace with allowed port (e.g., 22 for SSH)
+# Configuration
+ALLOWED_IP = "192.168.1.102"      # Replace with your actual allowed client IP
+ALLOWED_PORT = 22                 # Replace with the allowed port (e.g., SSH)
 
-Set up logging
-logging.basicConfig(filename="honeypot.log", level=logging.INFO, format='%(asctime)s - %(message)s')
+# Logging setup
+logging.basicConfig(
+    filename='honeypot.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-def honeypot(pkt):
-scapy_pkt = IP(pkt.get_payload())
-if scapy_pkt.haslayer(TCP):
-src_ip = scapy_pkt[IP].src
-dst_port = scapy_pkt[TCP].dport
-logging.info(f"HONEYPOT: Denied access from {src_ip} to port {dst_port}")
-pkt.drop() # Drop the packet
+def process_packet(packet):
+    payload = packet.get_payload()
+    pkt = IP(payload)
 
-def process_packet(pkt):
-scapy_pkt = IP(pkt.get_payload())
-if scapy_pkt.haslayer(TCP):
-src_ip = scapy_pkt[IP].src
-dst_port = scapy_pkt[TCP].dport
-if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
-pkt.accept() # Allow
-else:
-honeypot(pkt) # Send to honeypot logger
-else:
-pkt.accept() # Allow non-TCP packets (like ICMP/ping)
+    if pkt.haslayer(TCP):
+        src_ip = pkt[IP].src
+        dst_port = pkt[TCP].dport
 
-nfqueue = NetfilterQueue()
-nfqueue.bind(1, process_packet)
+        if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
+            logging.info(f"Firewall: Allowed {src_ip} to port {dst_port}")
+            packet.accept()
+        else:
+            logging.warning(f"HONEYPOT: Denied access from {src_ip} to port {dst_port}")
+            # Optionally mimic a real service here
+            packet.drop()
+    else:
+        # Accept non-TCP packets (like ICMP/ping)
+        packet.accept()
 
-try:
-print("[*] Firewall + Honeypot running...")
-nfqueue.run()
-except KeyboardInterrupt:
-print("Stopping.")
-finally:
-nfqueue.unbind()
+def main():
+    nfqueue = NetfilterQueue()
+    nfqueue.bind(1, process_packet)
+
+    try:
+        print("[*] Firewall + Honeypot running. Press Ctrl+C to stop.")
+        nfqueue.run()
+    except KeyboardInterrupt:
+        print("\n[!] Stopped by user.")
+    finally:
+        nfqueue.unbind()
+
+if __name__ == "__main__":
+    main()
