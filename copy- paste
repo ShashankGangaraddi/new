@@ -1,1 +1,1 @@
-sudo pip3 install git+git://github.com/AdamC00/NetfilterQueue.git scapy --break-system-packages
+git clone https://github.com/AdamC00/NetfilterQueue.git
