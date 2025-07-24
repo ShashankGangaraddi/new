@@ -1,5 +1,10 @@
-shashank-g@Firewall-VM:~/Downloads$ sudo iptables -L FORWARD -v -n
-Chain FORWARD (policy ACCEPT 60 packets, 4437 bytes)
- pkts bytes target     prot opt in     out     source               destination         
-   38  2770 NFQUEUE    0    --  *      *       0.0.0.0/0            0.0.0.0/0            NFQUEUE num 0
-shashank-g@Firewall-VM:~/Downloads$ ^C
+import netfilterqueue
+
+def print_and_accept(pkt):
+    print(pkt)
+    pkt.accept()
+
+queue = netfilterqueue.NetfilterQueue()
+queue.bind(0, print_and_accept)
+queue.run()
+      
