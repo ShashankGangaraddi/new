@@ -1,17 +1,18 @@
+# firewall_honeypot.py
+import logging
 from netfilterqueue import NetfilterQueue
 from scapy.all import IP, TCP
-import logging
 
-# Configuration
-ALLOWED_IP = "192.168.1.102"      # Replace with your actual allowed client IP
-ALLOWED_PORT = 22                 # Replace with the allowed port (e.g., SSH)
-
-# Logging setup
+# Configure logging
 logging.basicConfig(
     filename='honeypot.log',
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s [HONEYPOT] %(message)s'
 )
+
+# Configuration
+ALLOWED_IP = "192.168.50.2"    # Use a fake IP so that all others trigger honeypot
+ALLOWED_PORT = 22              # Only allow SSH on port 22 from the allowed IP
 
 def process_packet(packet):
     payload = packet.get_payload()
@@ -22,27 +23,21 @@ def process_packet(packet):
         dst_port = pkt[TCP].dport
 
         if src_ip == ALLOWED_IP and dst_port == ALLOWED_PORT:
-            logging.info(f"Firewall: Allowed {src_ip} to port {dst_port}")
+            print(f"[FIREWALL] Allowed: {src_ip}:{dst_port}")
             packet.accept()
         else:
-            logging.warning(f"HONEYPOT: Denied access from {src_ip} to port {dst_port}")
-            # Optionally mimic a real service here
+            print(f"[HONEYPOT] Logging attempt from {src_ip}:{dst_port}")
+            logging.info(f"Detected unauthorized access from {src_ip} to port {dst_port}")
             packet.drop()
     else:
-        # Accept non-TCP packets (like ICMP/ping)
         packet.accept()
 
-def main():
-    nfqueue = NetfilterQueue()
-    nfqueue.bind(1, process_packet)
+nfqueue = NetfilterQueue()
+nfqueue.bind(1, process_packet)
 
-    try:
-        print("[*] Firewall + Honeypot running. Press Ctrl+C to stop.")
-        nfqueue.run()
-    except KeyboardInterrupt:
-        print("\n[!] Stopped by user.")
-    finally:
-        nfqueue.unbind()
-
-if __name__ == "__main__":
-    main()
+print("[*] Firewall & Honeypot running. Waiting for packets...")
+try:
+    nfqueue.run()
+except KeyboardInterrupt:
+    print("\n[*] Stopping firewall.")
+    nfqueue.unbind()
