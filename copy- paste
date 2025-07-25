@@ -1,36 +1,32 @@
 #!/usr/sbin/nft -f
 
-flush ruleset
+table inet firewall {
+    chain input {
+        type filter hook input priority 0; policy drop;
 
-table inet myfirewall {
-  chain input {
-    type filter hook input priority 0;
-    policy accept;
-  }
+        iif "lo" accept
+        ct state established,related accept
+    }
 
-  chain forward {
-    type filter hook forward priority 0;
-    policy drop;
+    chain forward {
+        type filter hook forward priority 0; policy drop;
 
-    # Allow ESTABLISHED and RELATED traffic
-    ct state established, related accept
+        # Allow ICMP (ping) from VM2 to internet
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 icmp accept
 
-    # Allow DNS from VM2 (TCP and UDP port 53)
-    ip saddr 192.168.50.100 udp dport 53 accept
-    ip saddr 192.168.50.100 tcp dport 53 accept
+        # Allow HTTP (port 80) from VM2
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport 80 accept
 
-    # Allow HTTP from VM2 (port 80)
-    ip saddr 192.168.50.100 tcp dport 80 accept
+        # Allow HTTPS (port 443) from VM2
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport 443 accept
 
-    # Log and drop other traffic from VM2
-    ip saddr 192.168.50.100 log prefix "DROP_VM2: " flags all drop
+        # Allow DNS (UDP 53) from VM2
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 udp dport 53 accept
 
-    # Allow other internal forwarding
-    accept
-  }
+        # Log and drop everything else from VM2
+        ip saddr 192.168.50.100 log prefix "🔥 BLOCKED: " flags all counter drop
 
-  chain output {
-    type filter hook output priority 0;
-    policy accept;
-  }
+        # Allow other forwarding if needed (e.g., for responses to VM2)
+        ct state established,related accept
+    }
 }
