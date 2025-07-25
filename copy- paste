@@ -1,2 +1,38 @@
-echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0;
+        policy accept;
+    }
+
+    chain forward {
+        type filter hook forward priority 0;
+        policy drop;
+
+        ip saddr 192.168.50.100 ip daddr 0.0.0.0/0 ct state established,related accept
+        ip saddr 192.168.50.100 ip protocol icmp accept
+        ip saddr 192.168.50.100 udp dport 53 accept
+        ip saddr 192.168.50.100 tcp dport 80 accept
+
+        log prefix "DROP-VM2: " flags all
+    }
+
+    chain output {
+        type filter hook output priority 0;
+        policy accept;
+    }
+}
+
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority 0;
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        oifname "enp0s3" masquerade
+    }
+}
