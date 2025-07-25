@@ -3,34 +3,34 @@
 flush ruleset
 
 table inet myfirewall {
-    chain input {
-        type filter hook input priority 0;
-        policy accept;
-    }
+  chain input {
+    type filter hook input priority 0;
+    policy accept;
+  }
 
-    chain forward {
-        type filter hook forward priority 0;
-        policy drop;
+  chain forward {
+    type filter hook forward priority 0;
+    policy drop;
 
-        # Allow ESTABLISHED,RELATED connections
-        ct state established,related accept
+    # Allow ESTABLISHED and RELATED traffic
+    ct state established, related accept
 
-        # Allow DNS (UDP and TCP port 53) from VM2
-        ip saddr 192.168.50.100 udp dport 53 accept
-        ip saddr 192.168.50.100 tcp dport 53 accept
+    # Allow DNS from VM2 (TCP and UDP port 53)
+    ip saddr 192.168.50.100 udp dport 53 accept
+    ip saddr 192.168.50.100 tcp dport 53 accept
 
-        # Allow HTTP (port 80) only to Google IP range (e.g., 142.250.0.0/16)
-        ip saddr 192.168.50.100 ip daddr 142.250.0.0/16 tcp dport 80 accept
+    # Allow HTTP from VM2 (port 80)
+    ip saddr 192.168.50.100 tcp dport 80 accept
 
-        # Drop and log any other traffic from VM2
-        ip saddr 192.168.50.100 log prefix "DROP_VM2: " flags all drop
+    # Log and drop other traffic from VM2
+    ip saddr 192.168.50.100 log prefix "DROP_VM2: " flags all drop
 
-        # Allow all other traffic (not from VM2)
-        accept
-    }
+    # Allow other internal forwarding
+    accept
+  }
 
-    chain output {
-        type filter hook output priority 0;
-        policy accept;
-    }
+  chain output {
+    type filter hook output priority 0;
+    policy accept;
+  }
 }
