@@ -1,12 +1,49 @@
-network:
-  version: 2
-  ethernets:
-    enp0s3:
-      dhcp4: no
-      addresses:
-        - 192.168.50.100/24
-      gateway4: 192.168.50.1
-      nameservers:
-        addresses:
-          - 8.8.8.8
-          - 1.1.1.1
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority 0;
+    policy drop;
+
+    # Allow established connections
+    ct state established,related accept
+
+    # Allow loopback
+    iif lo accept
+
+    # Allow SSH from anywhere
+    tcp dport 22 accept
+
+    # Allow ICMP (ping)
+    ip protocol icmp accept
+  }
+
+  chain forward {
+    type filter hook forward priority 0;
+    policy drop;
+
+    # Allow VM2 to forward through VM1 to internet
+    iif "enp0s8" oif "enp0s3" ct state new,established,related accept
+    iif "enp0s3" oif "enp0s8" ct state established,related accept
+  }
+
+  chain output {
+    type filter hook output priority 0;
+    policy accept;
+  }
+}
+
+table ip nat {
+  chain prerouting {
+    type nat hook prerouting priority -100;
+  }
+
+  chain postrouting {
+    type nat hook postrouting priority 100;
+
+    # NAT traffic from VM2 to internet
+    oif "enp0s3" ip saddr 192.168.50.0/24 masquerade
+  }
+}
