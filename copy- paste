@@ -1,49 +1,29 @@
 #!/usr/sbin/nft -f
 
-flush ruleset
-
 table inet filter {
-  chain input {
-    type filter hook input priority 0;
-    policy drop;
+    chain input {
+        type filter hook input priority 0;
+        policy accept;
+    }
 
-    # Allow established connections
-    ct state established,related accept
+    chain forward {
+        type filter hook forward priority 0;
+        policy drop;
 
-    # Allow loopback
-    iif lo accept
+        # Allow already established connections
+        ct state established,related accept
 
-    # Allow SSH from anywhere
-    tcp dport 22 accept
+        # Allow forwarding from VM2 (192.168.50.100) to internet except restricted services
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport { 80, 443 } drop     # Block HTTP & HTTPS
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 icmp drop                      # Block ping
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 accept                         # Allow other traffic
 
-    # Allow ICMP (ping)
-    ip protocol icmp accept
-  }
+        # Allow traffic from other machines (or for routing)
+        ip saddr != 192.168.50.100 accept
+    }
 
-  chain forward {
-    type filter hook forward priority 0;
-    policy drop;
-
-    # Allow VM2 to forward through VM1 to internet
-    iif "enp0s8" oif "enp0s3" ct state new,established,related accept
-    iif "enp0s3" oif "enp0s8" ct state established,related accept
-  }
-
-  chain output {
-    type filter hook output priority 0;
-    policy accept;
-  }
-}
-
-table ip nat {
-  chain prerouting {
-    type nat hook prerouting priority -100;
-  }
-
-  chain postrouting {
-    type nat hook postrouting priority 100;
-
-    # NAT traffic from VM2 to internet
-    oif "enp0s3" ip saddr 192.168.50.0/24 masquerade
-  }
+    chain output {
+        type filter hook output priority 0;
+        policy accept;
+    }
 }
