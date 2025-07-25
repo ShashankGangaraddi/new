@@ -3,29 +3,36 @@
 flush ruleset
 
 table inet filter {
-  chain forward {
-    type filter hook forward priority 0;
+    chain input {
+        type filter hook input priority 0;
+        policy accept;
+    }
 
-    # Accept established/related connections
-    ct state established,related accept
+    chain forward {
+        type filter hook forward priority 0;
+        policy drop;
 
-    # Allow only selected traffic from VM2 (192.168.50.100)
-    ip saddr 192.168.50.100 ip protocol icmp accept         # Allow ICMP (ping)
-    ip saddr 192.168.50.100 udp dport 53 accept             # Allow DNS queries (UDP)
-    ip saddr 192.168.50.100 tcp dport 80 accept             # Allow HTTP
+        ip saddr 192.168.50.100 ip daddr 0.0.0.0/0 ct state established,related accept
+        ip saddr 192.168.50.100 ip protocol icmp accept
+        ip saddr 192.168.50.100 udp dport 53 accept
+        ip saddr 192.168.50.100 tcp dport 80 accept
 
-    # Log and drop everything else from VM2
-    ip saddr 192.168.50.100 log prefix "Blocked: " flags all level warning
-    ip saddr 192.168.50.100 drop
+        log prefix "DROP-VM2: " flags all
+    }
 
-    # Allow everything else not from VM2 (optional)
-    accept
-  }
+    chain output {
+        type filter hook output priority 0;
+        policy accept;
+    }
 }
 
 table ip nat {
-  chain postrouting {
-    type nat hook postrouting priority 100;
-    oifname "enp0s3" masquerade
-  }
+    chain prerouting {
+        type nat hook prerouting priority 0;
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        oifname "enp0s3" masquerade
+    }
 }
