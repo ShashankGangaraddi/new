@@ -1,29 +1,29 @@
 #!/usr/sbin/nft -f
 
 table inet filter {
-    chain input {
-        type filter hook input priority 0;
-        policy accept;
-    }
-
     chain forward {
         type filter hook forward priority 0;
         policy drop;
 
-        # Allow related or established traffic
-        ct state established,related accept
+        # Allow related/established traffic
+        ct state established, related accept
 
-        # Drop HTTP and HTTPS from VM2 (192.168.50.100) to external networks
-        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport { 80, 443 } drop
-
-        # Drop ICMP (ping) from VM2 to external networks
+        # Drop ping (ICMP echo-request) from VM2 to external
         ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 icmp type echo-request drop
 
-        # Allow everything else from VM2 to external
+        # Drop HTTP and HTTPS from VM2 to external
+        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport { 80, 443 } drop
+
+        # Allow all other traffic from VM2 to external
         ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 accept
 
-        # Allow all other forwarding traffic
+        # Allow all other internal traffic
         accept
+    }
+
+    chain input {
+        type filter hook input priority 0;
+        policy accept;
     }
 
     chain output {
