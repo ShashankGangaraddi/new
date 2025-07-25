@@ -1,38 +1,64 @@
-#!/usr/sbin/nft -f
+import socket
+import threading
 
-flush ruleset
+# Configuration
+VM1_IP = '192.168.50.1'       # VM1 internal interface IP
+LISTEN_PORT = 8080            # Port where firewall listens
+ALLOWED_CLIENT_IP = '192.168.50.100'  # VM2 IP allowed by the firewall
 
-table inet filter {
-    chain input {
-        type filter hook input priority 0;
-        policy accept;
-    }
+# Target server to forward allowed requests (e.g., Google DNS or Web server)
+TARGET_HOST = '8.8.8.8'       # example destination IP, could be anywhere
+TARGET_PORT = 53              # DNS port or change as needed (for demo)
 
-    chain forward {
-        type filter hook forward priority 0;
-        policy drop;
+def handle_client(client_socket, client_address):
+    print(f"Incoming connection from {client_address}")
 
-        ip saddr 192.168.50.100 ip daddr 0.0.0.0/0 ct state established,related accept
-        ip saddr 192.168.50.100 ip protocol icmp accept
-        ip saddr 192.168.50.100 udp dport 53 accept
-        ip saddr 192.168.50.100 tcp dport 80 accept
+    # Firewall rule: Accept traffic only from ALLOWED_CLIENT_IP
+    if client_address[0] != ALLOWED_CLIENT_IP:
+        print(f"Rejected connection from unauthorized IP: {client_address[0]}")
+        client_socket.close()
+        return
+    else:
+        print(f"Accepted connection from {client_address[0]}")
 
-        log prefix "DROP-VM2: " flags all
-    }
+    # Connect to the target destination
+    try:
+        remote_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        remote_socket.connect((TARGET_HOST, TARGET_PORT))
+    except Exception as e:
+        print(f"Failed to connect to target {TARGET_HOST}:{TARGET_PORT} - {e}")
+        client_socket.close()
+        return
 
-    chain output {
-        type filter hook output priority 0;
-        policy accept;
-    }
-}
+    # Start threads to relay data between client and remote host
+    def forward(source, destination):
+        try:
+            while True:
+                data = source.recv(4096)
+                if len(data) == 0:
+                    break
+                destination.sendall(data)
+        except:
+            pass
+        finally:
+            source.close()
+            destination.close()
 
-table ip nat {
-    chain prerouting {
-        type nat hook prerouting priority 0;
-    }
+    t1 = threading.Thread(target=forward, args=(client_socket, remote_socket))
+    t2 = threading.Thread(target=forward, args=(remote_socket, client_socket))
+    t1.start()
+    t2.start()
 
-    chain postrouting {
-        type nat hook postrouting priority 100;
-        oifname "enp0s3" masquerade
-    }
-}
+def start_firewall():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((VM1_IP, LISTEN_PORT))
+    server.listen(5)
+    print(f"Firewall (proxy) listening on {VM1_IP}:{LISTEN_PORT}")
+
+    while True:
+        client_sock, client_addr = server.accept()
+        client_handler = threading.Thread(target=handle_client, args=(client_sock, client_addr))
+        client_handler.start()
+
+if __name__ == '__main__':
+    start_firewall()
