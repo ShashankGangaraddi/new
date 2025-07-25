@@ -1,49 +1,12 @@
-from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP, send
-import time
-
-HONEYPOT_IP = "192.168.50.100"   # Block and fake only this IP
-HONEYPOT_PORT = 22               # Targeting SSH port
-LOG_FILE = "honeypot.log"
-
-def log_unauthorized(ip, sport):
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(LOG_FILE, "a") as log:
-        log.write(f"[{timestamp}] Unauthorized SSH access attempt from {ip}:{sport}\n")
-
-def packet_callback(pkt):
-    scapy_pkt = IP(pkt.get_payload())
-
-    # Check if packet is from the honeypot IP and is SSH (port 22)
-    if scapy_pkt.haslayer(TCP):
-        src_ip = scapy_pkt[IP].src
-        dst_port = scapy_pkt[TCP].dport
-
-        # Log and mimic only .100 trying to access SSH
-        if src_ip.endswith(".100") and dst_port == HONEYPOT_PORT:
-            print(f"[BLOCKED & LOGGED] Unauthorized SSH from {src_ip}")
-            log_unauthorized(src_ip, scapy_pkt[TCP].sport)
-
-            # Mimic SSH banner (fake reply)
-            fake_reply = IP(dst=scapy_pkt[IP].src, src=scapy_pkt[IP].dst) / \
-                         TCP(dport=scapy_pkt[TCP].sport, sport=scapy_pkt[TCP].dport,
-                             seq=12345, ack=scapy_pkt[TCP].seq + 1,
-                             flags='SA')  # SYN-ACK
-
-            send(fake_reply, verbose=False)
-            pkt.drop()
-        else:
-            print(f"[ALLOWED] Access from {src_ip} to port {dst_port}")
-            pkt.accept()
-    else:
-        pkt.accept()
-
-nfqueue = NetfilterQueue()
-nfqueue.bind(1, packet_callback)
-
-print("🔥 Firewall-Honeypot active. Monitoring traffic...")
-try:
-    nfqueue.run()
-except KeyboardInterrupt:
-    print("\nExiting...")
-    nfqueue.unbind()
+network:
+  version: 2
+  ethernets:
+    enp0s3:
+      dhcp4: no
+      addresses:
+        - 192.168.50.100/24
+      gateway4: 192.168.50.1
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 1.1.1.1
