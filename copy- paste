@@ -1,27 +1,67 @@
 import socket
 import threading
+import time
 
-# Configuration
-VM1_IP = '192.168.50.1'       # VM1 internal interface IP
-LISTEN_PORT = 8080            # Port where firewall listens
-ALLOWED_CLIENT_IP = '192.168.50.100'  # VM2 IP allowed by the firewall
+# --- Firewall configuration ---
+ALLOWED_CLIENT_IPS = {'192.168.50.100'}
+ALLOWED_CLIENT_PORTS = {10000, 15000, 20000}  # Example: only allow these source ports
+ALLOWED_TIME_RANGE = (8, 18)  # Accept connections between 8:00 and 18:00 server time (24h)
+BLACKLISTED_IPS = {'192.168.50.200'}  # Example of IP to block
 
-# Target server to forward allowed requests (e.g., Google DNS or Web server)
-TARGET_HOST = '8.8.8.8'       # example destination IP, could be anywhere
-TARGET_PORT = 53              # DNS port or change as needed (for demo)
+# Allowed destination mapping (could be a list of allowed destinations and ports)
+ALLOWED_DESTINATIONS = [
+    ('8.8.8.8', 53),     # DNS
+    ('1.1.1.1', 53),     # Alternate DNS
+    # Add more tuples as needed
+]
+
+LISTEN_IP = '192.168.50.1'
+LISTEN_PORT = 8080
+
+def is_within_time_window():
+    current_hour = time.localtime().tm_hour
+    return ALLOWED_TIME_RANGE[0] <= current_hour < ALLOWED_TIME_RANGE[1]
+
+def is_destination_allowed(host, port):
+    return (host, port) in ALLOWED_DESTINATIONS
 
 def handle_client(client_socket, client_address):
+    # Rule 0: Protocol check—only TCP handled
+    # (No need to check in code, since socket is TCP only)
+    
     print(f"Incoming connection from {client_address}")
+    src_ip, src_port = client_address
 
-    # Firewall rule: Accept traffic only from ALLOWED_CLIENT_IP
-    if client_address[0] != ALLOWED_CLIENT_IP:
-        print(f"Rejected connection from unauthorized IP: {client_address[0]}")
+    # Rule 1: Reject blacklisted IPs first
+    if src_ip in BLACKLISTED_IPS:
+        print(f"Denied: Blacklisted source IP {src_ip}")
         client_socket.close()
         return
-    else:
-        print(f"Accepted connection from {client_address[0]}")
 
-    # Connect to the target destination
+    # Rule 2: Only allow from specific client IPs
+    if src_ip not in ALLOWED_CLIENT_IPS:
+        print(f"Denied: Source IP {src_ip} not in allowed list")
+        client_socket.close()
+        return
+
+    # Rule 3: Allow only if from certain source ports (simulate "ephemeral" port filtering)
+    if src_port not in ALLOWED_CLIENT_PORTS:
+        print(f"Denied: Source port {src_port} not in allowed ports")
+        client_socket.close()
+        return
+
+    # Rule 4: Allow only during right time window
+    if not is_within_time_window():
+        print(f"Denied: Current hour outside allowed time range")
+        client_socket.close()
+        return
+
+    # Rule 5: Only allow forwarding to certain external destinations
+    # For demonstration, pick the first allowed dest
+    TARGET_HOST, TARGET_PORT = ALLOWED_DESTINATIONS[0]
+
+    print(f"Accepted: {src_ip}:{src_port} → {TARGET_HOST}:{TARGET_PORT}")
+
     try:
         remote_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         remote_socket.connect((TARGET_HOST, TARGET_PORT))
@@ -30,35 +70,36 @@ def handle_client(client_socket, client_address):
         client_socket.close()
         return
 
-    # Start threads to relay data between client and remote host
-    def forward(source, destination):
+    # Set up bidirectional relay
+    def forward(src, dst):
         try:
             while True:
-                data = source.recv(4096)
-                if len(data) == 0:
+                data = src.recv(4096)
+                if not data:
                     break
-                destination.sendall(data)
+                dst.sendall(data)
         except:
             pass
         finally:
-            source.close()
-            destination.close()
+            src.close()
+            dst.close()
 
-    t1 = threading.Thread(target=forward, args=(client_socket, remote_socket))
-    t2 = threading.Thread(target=forward, args=(remote_socket, client_socket))
-    t1.start()
-    t2.start()
+    threading.Thread(target=forward, args=(client_socket, remote_socket)).start()
+    threading.Thread(target=forward, args=(remote_socket, client_socket)).start()
 
 def start_firewall():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((VM1_IP, LISTEN_PORT))
-    server.listen(5)
-    print(f"Firewall (proxy) listening on {VM1_IP}:{LISTEN_PORT}")
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((LISTEN_IP, LISTEN_PORT))
+    server.listen(20)
+    print(f"Python Firewall Proxy listening on {LISTEN_IP}:{LISTEN_PORT}")
 
     while True:
-        client_sock, client_addr = server.accept()
-        client_handler = threading.Thread(target=handle_client, args=(client_sock, client_addr))
-        client_handler.start()
+        try:
+            client_sock, client_addr = server.accept()
+            threading.Thread(target=handle_client, args=(client_sock, client_addr)).start()
+        except Exception as e:
+            print(f"Server error: {e}")
 
 if __name__ == '__main__':
     start_firewall()
