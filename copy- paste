@@ -10,19 +10,20 @@ table inet filter {
         type filter hook forward priority 0;
         policy drop;
 
+        # Allow related or established traffic
         ct state established,related accept
 
-        # Block HTTP and HTTPS from VM2 to external internet
+        # Drop HTTP and HTTPS from VM2 (192.168.50.100) to external networks
         ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport { 80, 443 } drop
 
-        # Block ping (ICMP)
+        # Drop ICMP (ping) from VM2 to external networks
         ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 icmp type echo-request drop
 
-        # Allow other traffic from VM2
+        # Allow everything else from VM2 to external
         ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 accept
 
-        # Allow everything else (from other sources)
-        ip saddr != 192.168.50.100 accept
+        # Allow all other forwarding traffic
+        accept
     }
 
     chain output {
