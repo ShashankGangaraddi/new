@@ -1,29 +1,32 @@
 #!/usr/sbin/nft -f
 
-table inet filter {
+flush ruleset
+
+table inet myfirewall {
+    chain input {
+        type filter hook input priority 0;
+        policy accept;
+    }
+
     chain forward {
         type filter hook forward priority 0;
         policy drop;
 
-        # Allow related/established traffic
-        ct state established, related accept
+        # Allow ESTABLISHED,RELATED connections
+        ct state established,related accept
 
-        # Drop ping (ICMP echo-request) from VM2 to external
-        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 icmp type echo-request drop
+        # Allow DNS (UDP and TCP port 53) from VM2
+        ip saddr 192.168.50.100 udp dport 53 accept
+        ip saddr 192.168.50.100 tcp dport 53 accept
 
-        # Drop HTTP and HTTPS from VM2 to external
-        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 tcp dport { 80, 443 } drop
+        # Allow HTTP (port 80) only to Google IP range (e.g., 142.250.0.0/16)
+        ip saddr 192.168.50.100 ip daddr 142.250.0.0/16 tcp dport 80 accept
 
-        # Allow all other traffic from VM2 to external
-        ip saddr 192.168.50.100 ip daddr != 192.168.50.0/24 accept
+        # Drop and log any other traffic from VM2
+        ip saddr 192.168.50.100 log prefix "DROP_VM2: " flags all drop
 
-        # Allow all other internal traffic
+        # Allow all other traffic (not from VM2)
         accept
-    }
-
-    chain input {
-        type filter hook input priority 0;
-        policy accept;
     }
 
     chain output {
