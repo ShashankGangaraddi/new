@@ -1,35 +1,35 @@
 import socket
 import threading
 
-LISTEN_IP = '0.0.0.0'
+LISTEN_IP = '127.0.0.1'       # Listen only on localhost
 LISTEN_PORT = 8080
-BLOCKED_IP = '192.168.50.100'  # IP to block
 
-def handle_client(client_sock, client_addr):
-    src_ip = client_addr[0]
-    if src_ip == BLOCKED_IP:
-        print(f"NOT ALLOWED connection from {src_ip}: client is explicitly denied")
-        client_sock.close()
-        return
+def handle_client(sock, address):
+    src_ip = address[0]
+    # This demo only allows localhost (127.0.0.1)
+    if src_ip == '127.0.0.1':
+        print(f"ALLOWED: Connection from {src_ip}")
     else:
-        print(f"ALLOWED connection from {src_ip}: connection permitted")
+        print(f"BLOCKED: Connection from {src_ip}")
+        sock.close()
+        return
 
     try:
         while True:
-            data = client_sock.recv(1024)
+            data = sock.recv(1024)
             if not data:
                 break
-            # Optionally, echo or process data here
+            # Optionally echo or handle data
     except Exception as e:
         print(f"Connection error: {e}")
     finally:
-        client_sock.close()
+        sock.close()
 
 def start_firewall():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((LISTEN_IP, LISTEN_PORT))
-    server.listen(10)
+    server.listen(5)
     print(f"Firewall server listening on {LISTEN_IP}:{LISTEN_PORT}")
 
     while True:
