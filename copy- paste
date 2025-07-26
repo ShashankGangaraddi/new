@@ -3,63 +3,51 @@ import threading
 import time
 
 # --- Firewall configuration ---
-ALLOWED_CLIENT_IPS = {'192.168.50.100'}
-ALLOWED_CLIENT_PORTS = {10000, 15000, 20000}  # Example: only allow these source ports
-ALLOWED_TIME_RANGE = (8, 18)  # Accept connections between 8:00 and 18:00 server time (24h)
-BLACKLISTED_IPS = {'192.168.50.200'}  # Example of IP to block
+ALLOWED_CLIENT_IPS = {'192.168.50.100'}           # Allowed source IPs (e.g., VM2)
+ALLOWED_CLIENT_PORTS = {10000, 15000, 20000}      # Allowed source ports
+ALLOWED_TIME_RANGE = (8, 18)                       # Allowed active hours (8:00 - 18:00)
+BLACKLISTED_IPS = {'192.168.50.200'}              # Explicitly blocked IPs
 
-# Allowed destination mapping (could be a list of allowed destinations and ports)
+# Allowed destination IPs and ports for forwarding
 ALLOWED_DESTINATIONS = [
-    ('8.8.8.8', 53),     # DNS
-    ('1.1.1.1', 53),     # Alternate DNS
-    # Add more tuples as needed
+    ('8.8.8.8', 53),  # Google DNS — example target destination
+    ('1.1.1.1', 53),  # Alternate DNS
 ]
 
-LISTEN_IP = '192.168.50.1'
-LISTEN_PORT = 8080
+LISTEN_IP = '0.0.0.0'   # Listen on all interfaces (recommended)
+LISTEN_PORT = 8080      # Listening port
 
 def is_within_time_window():
     current_hour = time.localtime().tm_hour
     return ALLOWED_TIME_RANGE[0] <= current_hour < ALLOWED_TIME_RANGE[1]
 
-def is_destination_allowed(host, port):
-    return (host, port) in ALLOWED_DESTINATIONS
-
 def handle_client(client_socket, client_address):
-    # Rule 0: Protocol check—only TCP handled
-    # (No need to check in code, since socket is TCP only)
-    
     print(f"Incoming connection from {client_address}")
     src_ip, src_port = client_address
 
-    # Rule 1: Reject blacklisted IPs first
+    # Firewall rules enforcement
     if src_ip in BLACKLISTED_IPS:
         print(f"Denied: Blacklisted source IP {src_ip}")
         client_socket.close()
         return
 
-    # Rule 2: Only allow from specific client IPs
     if src_ip not in ALLOWED_CLIENT_IPS:
         print(f"Denied: Source IP {src_ip} not in allowed list")
         client_socket.close()
         return
 
-    # Rule 3: Allow only if from certain source ports (simulate "ephemeral" port filtering)
     if src_port not in ALLOWED_CLIENT_PORTS:
         print(f"Denied: Source port {src_port} not in allowed ports")
         client_socket.close()
         return
 
-    # Rule 4: Allow only during right time window
     if not is_within_time_window():
         print(f"Denied: Current hour outside allowed time range")
         client_socket.close()
         return
 
-    # Rule 5: Only allow forwarding to certain external destinations
-    # For demonstration, pick the first allowed dest
+    # Forwarding to the first allowed destination (for demo)
     TARGET_HOST, TARGET_PORT = ALLOWED_DESTINATIONS[0]
-
     print(f"Accepted: {src_ip}:{src_port} → {TARGET_HOST}:{TARGET_PORT}")
 
     try:
@@ -70,22 +58,22 @@ def handle_client(client_socket, client_address):
         client_socket.close()
         return
 
-    # Set up bidirectional relay
-    def forward(src, dst):
+    # Relay data between client and remote host
+    def forward(source, destination):
         try:
             while True:
-                data = src.recv(4096)
+                data = source.recv(4096)
                 if not data:
                     break
-                dst.sendall(data)
+                destination.sendall(data)
         except:
             pass
         finally:
-            src.close()
-            dst.close()
+            source.close()
+            destination.close()
 
-    threading.Thread(target=forward, args=(client_socket, remote_socket)).start()
-    threading.Thread(target=forward, args=(remote_socket, client_socket)).start()
+    threading.Thread(target=forward, args=(client_socket, remote_socket), daemon=True).start()
+    threading.Thread(target=forward, args=(remote_socket, client_socket), daemon=True).start()
 
 def start_firewall():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,9 +85,9 @@ def start_firewall():
     while True:
         try:
             client_sock, client_addr = server.accept()
-            threading.Thread(target=handle_client, args=(client_sock, client_addr)).start()
+            threading.Thread(target=handle_client, args=(client_sock, client_addr), daemon=True).start()
         except Exception as e:
             print(f"Server error: {e}")
 
-if __name__ == '__main__':
+if _name_ == '_main_':
     start_firewall()
